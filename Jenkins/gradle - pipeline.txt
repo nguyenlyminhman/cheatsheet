@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = "ip-docker-registry:port"
+        PROJECT = "mvn-demo"
+        IMAGE_NAME = "${REGISTRY}/${PROJECT}/${PROJECT}:${BUILD_NUMBER}"
+        TZ = "Asia/Phnom_Penh"
+    }
+
+    stages {
+        stage('Tool Install') {
+            steps {
+                echo "Installing tools..."
+                tool name: 'jdk8', type: 'jdk'
+                tool name: 'gradle4', type: 'gradle'
+                tool name: 'git', type: 'git'
+            }
+        }
+
+        stage('Cloning Git') {
+            steps {
+                git branch: 'uat',
+                    credentialsId: '9b1f6a64-335f-46b8-9b0c-25adcb142b80',
+                    url: 'http://gitlab.mafc.vn/prject.git'
+            }
+        }
+
+        stage('Build WAR File') {
+            steps {
+                sh '''
+                    echo "=== CLEAN & BUILD WAR ==="
+                    rm -rf out
+                    gradle clean publish_war
+                '''
+            }
+        }
+
+        stage('Extract WAR File') {
+            steps {
+                sh '''
+                    echo "=== EXTRACT WAR ==="
+                    mkdir -p out/artifacts
+                    cp build/libs/*.war out/artifacts/ROOT.war
+                    cd out/artifacts
+                    unzip -o ROOT.war -d ROOT
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh """
+                        echo "=== BUILD DOCKER IMAGE ==="
+                        docker build --no-cache -t ${IMAGE_NAME} -f Dockerfile .
+                    """
+                }
+            }
+        }
+
+        stage('Push Image to Registry') {
+            steps {
+                script {
+                    sh """
+                        echo "=== PUSH IMAGE TO REGISTRY ==="
+                        docker push ${IMAGE_NAME}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Build & Push successful: ${IMAGE_NAME}"
+        }
+        failure {
+            echo "❌ Build failed at stage: ${env.STAGE_NAME}"
+        }
+    }
+}

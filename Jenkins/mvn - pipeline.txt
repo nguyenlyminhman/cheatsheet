@@ -1,0 +1,91 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = "ip-docker-registry:por"
+        APP_NAME = "project-name-uat"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_NAME = "${REGISTRY}/${APP_NAME}:${IMAGE_TAG}"
+        TZ = "Asia/Phnom_Penh"
+    }
+
+    stages {
+        stage('Tool Install') {
+            steps {
+                echo "=== Setting up build tools ==="
+                tool name: 'jdk21', type: 'jdk'
+                tool name: 'maven3', type: 'maven'
+                tool name: 'git', type: 'git'
+            }
+        }
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+                echo "Workspace cleaned"
+            }
+        }
+
+        stage('Clone Git') {
+            steps {
+                git branch: 'uat',
+                    credentialsId: '25adcb142b80',
+                    url: 'project-link.git'
+            }
+        }
+
+        stage('Maven Build WAR') {
+            steps {
+                sh '''
+                    echo "=== Building WAR package ==="
+                    mvn clean package -DskipTests
+                    mkdir -p target
+                    ls -lh target/
+                '''
+            }
+        }
+
+        stage('Extract WAR (optional, verify only)') {
+            steps {
+                sh '''
+                    echo "=== Extracting WAR for verification ==="
+                    rm -rf target/ROOT
+                    mkdir -p target/ROOT
+                    unzip -o target/ROOT.war -d target/ROOT > /dev/null
+                    echo "WAR extracted successfully."
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    echo "=== Building Docker Image ==="
+                    docker build --no-cache -t ${IMAGE_NAME} -f Dockerfile .
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh '''
+                    echo "=== Pushing image to registry ==="
+                    docker push ${IMAGE_NAME}
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ SUCCESS: Image pushed: ${IMAGE_NAME}"
+            sh 'docker rmi ${IMAGE_NAME} || true'
+        }
+        failure {
+            echo "❌ FAILED: Pipeline encountered an error"
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
